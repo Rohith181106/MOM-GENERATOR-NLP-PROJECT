@@ -1,0 +1,43 @@
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python & Backend
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Database & Local Stores
+*.db
+*.sqlite
+*.sqlite3
+mom_app.db
+
+# Uploads & Generated Exports
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/exports/*
+!backend/exports/.gitkeep
+uploads/
+exports/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
