@@ -105,7 +105,31 @@ class SpeakerDiarizationService:
             feat_std = np.std(X, axis=0) + 1e-6
             X_norm = (X - feat_mean) / feat_std
 
-            n_clusters = min(max(2, num_speakers or 2), len(valid_windows))
+            # Determine optimal number of speakers dynamically if not explicitly specified
+            if num_speakers and num_speakers >= 2:
+                n_clusters = min(num_speakers, len(valid_windows))
+            else:
+                max_k = min(8, len(valid_windows) - 1)
+                if max_k >= 3:
+                    try:
+                        from sklearn.metrics import silhouette_score
+                        best_k = 2
+                        best_score = -1.0
+                        for k in range(2, max_k + 1):
+                            cl = AgglomerativeClustering(n_clusters=k)
+                            l = cl.fit_predict(X_norm)
+                            if len(set(l)) > 1:
+                                score = silhouette_score(X_norm, l)
+                                if score > best_score:
+                                    best_score = score
+                                    best_k = k
+                        n_clusters = best_k
+                    except Exception:
+                        n_clusters = min(3, len(valid_windows))
+                else:
+                    n_clusters = min(2, len(valid_windows))
+
+            logger.info(f"Acoustic diarization identified {n_clusters} distinct speakers from audio.")
             clustering = AgglomerativeClustering(n_clusters=n_clusters)
             labels = clustering.fit_predict(X_norm)
 
@@ -142,7 +166,7 @@ class SpeakerDiarizationService:
     def diarize_audio(self, audio_path: str, num_speakers: int = None) -> List[Dict[str, Any]]:
         """
         Diarizes an audio file to determine who spoke when.
-        Returns intervals with start, end, and speaker_label (e.g. SPEAKER_00, SPEAKER_01)
+        Returns intervals with start, end, and speaker_label (e.g. SPEAKER_00, SPEAKER_01, SPEAKER_02, ...)
         """
         if not audio_path or not os.path.exists(audio_path):
             return []
@@ -150,7 +174,15 @@ class SpeakerDiarizationService:
         pipeline = self._get_pipeline()
         if pipeline:
             try:
-                diarization = pipeline(audio_path, num_speakers=num_speakers)
+                # pyannote automatically estimates speaker count if num_speakers is None
+                kwargs = {}
+                if num_speakers:
+                    kwargs["num_speakers"] = num_speakers
+                else:
+                    kwargs["min_speakers"] = 2
+                    kwargs["max_speakers"] = 10
+
+                diarization = pipeline(audio_path, **kwargs)
                 speaker_turns = []
                 for turn, _, speaker in diarization.itertracks(yield_label=True):
                     speaker_turns.append({
@@ -173,7 +205,7 @@ class SpeakerDiarizationService:
                 logger.warning(f"Could not convert to 16k wav for diarization: {ex}")
                 wav_path = audio_path
 
-        return self._cluster_acoustic_features(wav_path, num_speakers=num_speakers or 2)
+        return self._cluster_acoustic_features(wav_path, num_speakers=num_speakers)
 
 diarization_service = SpeakerDiarizationService()
 

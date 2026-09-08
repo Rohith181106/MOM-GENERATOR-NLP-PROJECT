@@ -24,68 +24,93 @@ class ActionItemDetector:
 
     def detect_action_in_text(self, text: str, speaker_name: Optional[str] = None, timestamp_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Evaluates whether a single utterance contains an action item.
-        Used for both live preliminary notifications and batch processing.
+        Evaluates whether an utterance contains an explicit action item / task commitment.
+        Excludes opinions, problem descriptions, and non-committal banter.
         """
-        text_lower = text.lower()
+        text_clean = text.strip()
+        text_lower = text_clean.lower()
         
-        # Action intent patterns:
-        action_patterns = [
-            r"(i will|i'll|will finish|will complete|going to complete|take ownership|can you take|will wrap up|assigned to|please make sure to|need to finish|needs to implement|action item)\s+(.*)",
-            r"(let's|let us)\s+(make sure|implement|deploy|finish|schedule)\s+(.*)",
-            r"([a-z]+)\s+(will|shall|is going to)\s+(finish|complete|implement|fix|prepare|send|review|deliver)\s+(.*)"
+        # 1. Non-action filter (instant rejection of observational / state descriptions)
+        non_action_starters = [
+            "we have had", "we had", "there was", "there were", "it was", "this was",
+            "performance was", "performance is", "issues were", "issue was", "problem was",
+            "this will allow", "it will allow", "that will allow", "this will be", "it will be",
+            "there will be", "we will see", "i think", "i feel", "i noticed", "they discussed",
+            "we discussed", "just wondering", "what do you think", "how does that sound"
         ]
+        if any(text_lower.startswith(prefix) for prefix in non_action_starters):
+            return None
+
+        # 2. Strict actionable intent patterns
+        action_verbs = r"(?:finish|complete|implement|fix|prepare|send|review|deliver|schedule|conduct|create|update|organize|draft|verify|deploy|follow up on|check|set up)"
         
+        explicit_commitment_patterns = [
+            # First person commitment: "I will finish...", "I'll take care of..."
+            rf"\b(?:i will|i'll|i am going to)\s+{action_verbs}\b\s*(.*)",
+            rf"\b(?:i will|i'll|i can)\s+(?:take ownership of|take care of|lead|handle)\b\s*(.*)",
+            # Explicit delegation to named person: "Dharun will finish...", "Sarah, please review..."
+            rf"\b([A-Z][a-z]{2,})\s+(?:will|is going to)\s+{action_verbs}\b\s*(.*)",
+            rf"\b([A-Z][a-z]{2,}),?\s+(?:can you please|please|could you)\s+{action_verbs}\b\s*(.*)",
+            # Explicit action item syntax
+            rf"\b(?:action item|action-item)\s*(?:is|for)?\s*(?:([A-Z][a-z]+|me|us))?\s*(?:to)?\s*(.*)",
+            # Clear team delegation: "Let's make sure to schedule...", "Please make sure to send..."
+            rf"\b(?:let's|let us|please)\s+(?:make sure to|ensure we)\s+{action_verbs}\b\s*(.*)"
+        ]
+
         is_action = False
-        task_candidate = ""
-        owner_candidate = "NEEDS_REVIEW"
-        deadline_candidate = "NEEDS_REVIEW"
-        
-        for pattern in action_patterns:
-            match = re.search(pattern, text_lower)
+        matched_owner = "NEEDS_REVIEW"
+
+        for pat in explicit_commitment_patterns:
+            match = re.search(pat, text_clean, re.IGNORECASE)
             if match:
                 is_action = True
+                # Extract owner if pattern captured person name
+                groups = match.groups()
+                if groups and groups[0] and re.match(r"^[A-Z][a-z]{2,}$", groups[0]):
+                    matched_owner = groups[0]
                 break
-                
-        # Also check with classifier if loaded
+
+        # 3. Optional Zero-shot verification with high confidence threshold
         classifier = self._get_classifier()
         if classifier and not is_action:
             try:
-                res = classifier(text, candidate_labels=["an action item or task commitment", "general discussion statement"])
-                if res['labels'][0] == "an action item or task commitment" and res['scores'][0] > 0.70:
-                    is_action = True
+                # Require high confidence (>0.88) and presence of at least one actionable verb
+                has_verb = bool(re.search(action_verbs, text_lower))
+                if has_verb and len(text_clean.split()) >= 4:
+                    res = classifier(text_clean, candidate_labels=["an assigned task commitment with explicit ownership", "general conversation or commentary"])
+                    if res['labels'][0] == "an assigned task commitment with explicit ownership" and res['scores'][0] > 0.88:
+                        is_action = True
             except Exception:
                 pass
-                
+
         if not is_action:
             return None
 
-        # Extract Task, Owner, Deadline
-        # 1. Owner extraction heuristic from speaker context
-        if re.search(r"\b(i will|i'll|i am going to)\b", text_lower):
-            owner_candidate = speaker_name if speaker_name else "NEEDS_REVIEW"
-        else:
-            # Check if text mentions a known person name
-            names_match = re.search(r"\b([A-Z][a-z]+)\s+(will|is going to|can you)\b", text)
-            if names_match:
-                owner_candidate = names_match.group(1)
+        # 4. Resolve owner candidate
+        owner_candidate = matched_owner
+        if owner_candidate == "NEEDS_REVIEW":
+            if re.search(r"\b(i will|i'll|i am going to|i can)\b", text_lower):
+                owner_candidate = speaker_name if speaker_name else "NEEDS_REVIEW"
+            else:
+                named_person = re.search(r"\b([A-Z][a-z]{2,})\s+(?:will|shall|is going to|can you)\b", text_clean)
+                if named_person and named_person.group(1) not in ["Today", "Tomorrow", "Monday", "Friday", "Let", "What"]:
+                    owner_candidate = named_person.group(1)
 
-        # 2. Deadline detection
-        deadline_match = re.search(r"\b(by\s+(?:friday|monday|tuesday|wednesday|thursday|tomorrow|next\s+week|next\s+monday|end\s+of\s+month|today)|before\s+[a-z]+)\b", text_lower)
+        # 5. Resolve deadline candidate
+        deadline_candidate = "NEEDS_REVIEW"
+        deadline_match = re.search(r"\b(by\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next\s+[a-z]+|end\s+of\s+month|today|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+|\d{4}-\d{2}-\d{2})|before\s+[a-z]+)\b", text_lower)
         if deadline_match:
             deadline_candidate = deadline_match.group(1)
 
-        # 3. Task cleaning
-        clean_task = text
-        # Remove prefixes dynamically (e.g. "I will", "Alex will", "can you please", etc.)
-        clean_task = re.sub(r"^(?:yes,?\s*)?(?:(?:i|we|[A-Za-z0-9_]+)\s+(?:will|'ll|must|shall|need to|is going to)|can you(?:\s+please)?|please)\s+", "", clean_task, flags=re.IGNORECASE)
-        # Remove trailing deadline from task
-        clean_task = re.sub(r"\s+by\s+(?:friday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next\s+[a-z]+|end\s+of\s+month|today).*$", "", clean_task, flags=re.IGNORECASE)
+        # 6. Task cleaning
+        clean_task = text_clean
+        clean_task = re.sub(r"^(?:yes,?\s*)?(?:(?:i|we|[A-Za-z0-9_]+)\s+(?:will|'ll|must|shall|need to|is going to)|can you(?:\s+please)?|please(?:\s+make sure to)?|let's\s+make sure to)\s+", "", clean_task, flags=re.IGNORECASE)
+        clean_task = re.sub(r"\s+by\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next\s+[a-z]+|end\s+of\s+month|today).*$", "", clean_task, flags=re.IGNORECASE)
         clean_task = clean_task.strip().rstrip(".,")
-        if not clean_task:
-            clean_task = text
+        if len(clean_task) < 5:
+            clean_task = text_clean
 
-        full_evidence = f"{timestamp_str}: {text}" if timestamp_str else text
+        full_evidence = f"{timestamp_str}: {text_clean}" if timestamp_str else text_clean
 
         return {
             "task": clean_task,

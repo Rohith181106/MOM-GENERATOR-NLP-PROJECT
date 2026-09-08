@@ -26,19 +26,47 @@ class MoMGenerator:
         """
         participant_names = ", ".join(participants) if participants else "Team members"
         
-        # Formulate executive summary grounded in detected topics and decisions
-        summary_sentences = [
-            f"The team convened for the '{meeting_title}' on {date_str} with {participant_names}.",
-            f"Key discussion areas encompassed {', '.join([t['topic_name'] for t in topics]) if topics else 'project deliverables and operational sync'}."
-        ]
-        if decisions:
-            summary_sentences.append(f"Major decisions finalized include: {'; '.join([d['decision'] for d in decisions])}.")
-        if actions:
-            summary_sentences.append(f"A total of {len(actions)} clear action item(s) were assigned with target deadlines.")
-        if unresolved:
-            summary_sentences.append(f"Remaining open challenges requiring future resolution: {'; '.join([u['issue'] for u in unresolved])}.")
+        # Formulate executive summary grounded in actual discussion topics and verified takeaways
+        summary_paragraphs = []
+        
+        # 1. Opening context
+        if date_str and date_str != "UNKNOWN":
+            opening = f"The team convened for '{meeting_title}' on {date_str}."
+        else:
+            opening = f"The team convened for '{meeting_title}'."
+            
+        topic_titles = [t['topic_name'] for t in topics if t.get('topic_name')]
+        if topic_titles:
+            opening += f" Primary discussion centered around {', '.join(topic_titles[:4])}" + (f", and {len(topic_titles) - 4} additional operational areas." if len(topic_titles) > 4 else ".")
+        else:
+            opening += " The session covered strategic alignment and operational project reviews."
+        summary_paragraphs.append(opening)
 
-        executive_summary = " ".join(summary_sentences)
+        # 2. Key discussion highlights extracted from topic segments
+        topic_highlights = []
+        for t in topics[:6]:
+            t_name = t.get("topic_name")
+            t_summary = t.get("summary", "").strip()
+            if t_summary and len(t_summary) > 20:
+                topic_highlights.append(f"{t_name}: {t_summary}")
+        if topic_highlights:
+            summary_paragraphs.append("Key points discussed included: " + " ".join(topic_highlights))
+
+        # 3. Decisions & Commitments summary
+        conclusions = []
+        if decisions:
+            dec_list = [d["decision"].rstrip(".") for d in decisions[:3]]
+            conclusions.append(f"Confirmed decisions include: {'; '.join(dec_list)}.")
+        if actions:
+            conclusions.append(f"{len(actions)} distinct action item(s) were assigned with target completion milestones.")
+        if unresolved:
+            unres_list = [u["issue"].rstrip(".") for u in unresolved[:2]]
+            conclusions.append(f"Open topics for follow-up review: {'; '.join(unres_list)}.")
+
+        if conclusions:
+            summary_paragraphs.append(" ".join(conclusions))
+
+        executive_summary = "\n\n".join(summary_paragraphs)
 
         structured_output = {
             "title": meeting_title,
