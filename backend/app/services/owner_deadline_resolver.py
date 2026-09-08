@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Optional, List
 import dateparser
 import logging
@@ -56,14 +56,13 @@ class OwnerDeadlineResolver:
                 return speaker_name
             return "NEEDS_REVIEW"
 
-        roster_names = roster or ["Rohith", "Dharun", "Priya", "Rahul"]
-        # Match case-insensitively against roster
+        if raw_owner.lower() in ["i", "me", "myself", "we"]:
+            return speaker_name if speaker_name else "NEEDS_REVIEW"
+
+        roster_names = [r.strip() for r in (roster or []) if r and r.strip()]
         for name in roster_names:
             if name.lower() in raw_owner.lower():
                 return name
-                
-        if raw_owner.lower() in ["i", "me", "myself"]:
-            return speaker_name if speaker_name else "NEEDS_REVIEW"
 
         return raw_owner
 

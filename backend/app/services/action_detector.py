@@ -1,4 +1,4 @@
-﻿import re
+import re
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -22,7 +22,7 @@ class ActionItemDetector:
             self._initialized = True
         return self._classifier
 
-    def detect_action_in_text(self, text: str, speaker_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def detect_action_in_text(self, text: str, speaker_name: Optional[str] = None, timestamp_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Evaluates whether a single utterance contains an action item.
         Used for both live preliminary notifications and batch processing.
@@ -77,19 +77,22 @@ class ActionItemDetector:
 
         # 3. Task cleaning
         clean_task = text
-        # Remove prefixes like "I will finish", "Dharun will"
-        clean_task = re.sub(r"^(yes,?\s*)?(i will|i'll|we need to|dharun will|priya will|can you)\s+", "", clean_task, flags=re.IGNORECASE)
+        # Remove prefixes dynamically (e.g. "I will", "Alex will", "can you please", etc.)
+        clean_task = re.sub(r"^(?:yes,?\s*)?(?:(?:i|we|[A-Za-z0-9_]+)\s+(?:will|'ll|must|shall|need to|is going to)|can you(?:\s+please)?|please)\s+", "", clean_task, flags=re.IGNORECASE)
         # Remove trailing deadline from task
-        clean_task = re.sub(r"\s+by\s+(?:friday|monday|tuesday|wednesday|thursday|tomorrow|next\s+week|next\s+monday|end\s+of\s+month|today).*$", "", clean_task, flags=re.IGNORECASE)
+        clean_task = re.sub(r"\s+by\s+(?:friday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next\s+[a-z]+|end\s+of\s+month|today).*$", "", clean_task, flags=re.IGNORECASE)
         clean_task = clean_task.strip().rstrip(".,")
         if not clean_task:
             clean_task = text
+
+        full_evidence = f"{timestamp_str}: {text}" if timestamp_str else text
 
         return {
             "task": clean_task,
             "owner": owner_candidate,
             "deadline": deadline_candidate,
-            "evidence": text,
+            "evidence": full_evidence,
+            "source_timestamp": timestamp_str or "00:00",
             "confidence": 0.94,
             "needs_review": (owner_candidate == "NEEDS_REVIEW" or deadline_candidate == "NEEDS_REVIEW")
         }
@@ -99,7 +102,10 @@ class ActionItemDetector:
         for seg in segments:
             text = seg.get("text", "")
             speaker = seg.get("speaker_name")
-            detected = self.detect_action_in_text(text, speaker_name=speaker)
+            start = seg.get("start_time", 0.0)
+            end = seg.get("end_time", 0.0)
+            ts = f"[{int(start//60):02d}:{int(start%60):02d} - {int(end//60):02d}:{int(end%60):02d}]"
+            detected = self.detect_action_in_text(text, speaker_name=speaker, timestamp_str=ts)
             if detected:
                 actions.append(detected)
         return actions

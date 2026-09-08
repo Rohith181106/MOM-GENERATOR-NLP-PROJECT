@@ -43,21 +43,17 @@ async def test_full_application_flow():
         assert me_resp.status_code == 200
         assert me_resp.json()["email"] == "rohith@example.com"
 
-        # 5. Create Meeting for User A
-        meeting_data = {
-            "title": "Backend Architecture & Sprint Planning",
-            "date": "2026-09-08",
-            "meeting_type": "LIVE",
-            "participants": ["Rohith", "Dharun", "Priya"]
-        }
-        m_resp = await ac.post("/api/meetings", json=meeting_data, headers=headers_a)
-        assert m_resp.status_code == 200
-        meeting_id = m_resp.json()["id"]
-
-        # 6. Execute Full Pipeline for Meeting
-        process_resp = await ac.post(f"/api/meetings/{meeting_id}/process", headers=headers_a)
-        assert process_resp.status_code == 200
-        m_detail = process_resp.json()
+        # 5. Upload Real Audio File to trigger genuine full pipeline
+        with open(r"d:\MOM GENERATOR\test_meeting.wav", "rb") as f:
+            upload_resp = await ac.post(
+                "/api/meetings/upload",
+                data={"title": "Backend Architecture & Sprint Planning", "participants": "Rohith, Dharun, Priya"},
+                files={"file": ("test_meeting.wav", f, "audio/wav")},
+                headers=headers_a
+            )
+        assert upload_resp.status_code == 200
+        m_detail = upload_resp.json()
+        meeting_id = m_detail["id"]
         assert m_detail["status"] == "COMPLETED"
         assert len(m_detail["transcript_segments"]) > 0
         assert len(m_detail["action_items"]) > 0

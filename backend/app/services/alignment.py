@@ -1,4 +1,4 @@
-﻿from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 
 class TranscriptSpeakerAligner:
     @staticmethod
@@ -8,15 +8,13 @@ class TranscriptSpeakerAligner:
         participant_roster: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Aligns Whisper transcript segments with pyannote speaker intervals
-        and resolves speaker labels to participant names from the roster.
+        Aligns Whisper transcript segments with speaker intervals.
+        If participant roster is provided, maps speaker labels to names.
+        Otherwise retains genuine SPEAKER_00, SPEAKER_01 labels without inventing names.
         """
         aligned_segments = []
         speaker_map = {}
-        roster = participant_roster or ["Rohith", "Dharun", "Priya", "Rahul"]
-        
-        # Build speaker assignment
-        speaker_turn_index = 0
+        roster = [p.strip() for p in (participant_roster or []) if p and p.strip()]
         
         for i, segment in enumerate(whisper_segments):
             seg_start = segment.get("start", 0.0)
@@ -37,17 +35,20 @@ class TranscriptSpeakerAligner:
                     matched_speaker = interval.get("speaker_label")
                     
             if not matched_speaker:
-                # Fallback: cyclical or context turn speaker
-                # Use linguistic clue if someone says "Dharun, can you..." -> previous speaker is addressing Dharun
-                label_idx = i % max(1, len(roster))
+                label_idx = i % 2
                 matched_speaker = f"SPEAKER_{label_idx:02d}"
 
-            # Map to participant roster
-            if matched_speaker not in speaker_map:
-                assigned_name = roster[len(speaker_map) % len(roster)]
-                speaker_map[matched_speaker] = assigned_name
-                
-            speaker_name = speaker_map[matched_speaker]
+            # Map to participant roster only if roster was provided
+            if roster:
+                if matched_speaker not in speaker_map:
+                    if len(speaker_map) < len(roster):
+                        assigned_name = roster[len(speaker_map)]
+                    else:
+                        assigned_name = matched_speaker
+                    speaker_map[matched_speaker] = assigned_name
+                speaker_name = speaker_map[matched_speaker]
+            else:
+                speaker_name = matched_speaker
             
             aligned_segments.append({
                 "start_time": seg_start,

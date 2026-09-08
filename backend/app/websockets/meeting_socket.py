@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 from typing import Dict, Set
 from fastapi import WebSocket, WebSocketDisconnect
@@ -52,13 +52,69 @@ class MeetingConnectionManager:
             # Binary audio chunk from microphone
             current_offset = self.meeting_timers.get(meeting_id, 0.0)
             res = stt_service.transcribe_audio_chunk(data, current_offset)
-            if res:
-                self.meeting_timers[meeting_id] += (res["end"] - res["start"])
-                # Emit interim / final
-                await self.broadcast_event(meeting_id, {
-                    "type": "transcript_partial",
-                    "text": res["text"]
-                })
+            if res and res.get("text"):
+                chunk_text = res["text"].strip()
+                self.meeting_timers[meeting_id] = res["end"]
+                
+                # Check if it looks like a complete utterance
+                is_sentence = chunk_text.endswith((".", "?", "!")) or len(chunk_text.split()) >= 6
+                if is_sentence:
+                    speaker_label = "SPEAKER_00"
+                    speaker_name = "Speaker"
+                    async with AsyncSessionLocal() as session:
+                        segment = TranscriptSegment(
+                            meeting_id=meeting_id,
+                            speaker_label=speaker_label,
+                            speaker_name=speaker_name,
+                            start_time=res["start"],
+                            end_time=res["end"],
+                            text=chunk_text,
+                            confidence=res.get("confidence", 0.92),
+                            is_final=True
+                        )
+                        session.add(segment)
+                        await session.commit()
+                        await session.refresh(segment)
+                        seg_id = segment.id
+
+                    await self.broadcast_event(meeting_id, {
+                        "type": "transcript_final",
+                        "id": seg_id,
+                        "meeting_id": meeting_id,
+                        "speaker": speaker_name,
+                        "speaker_label": speaker_label,
+                        "start": res["start"],
+                        "end": res["end"],
+                        "text": chunk_text
+                    })
+
+                    # Check for live action detection
+                    action_item = action_detector.detect_action_in_text(chunk_text, speaker_name=speaker_name)
+                    if action_item:
+                        await self.broadcast_event(meeting_id, {
+                            "type": "action_detected",
+                            "meeting_id": meeting_id,
+                            "task": action_item["task"],
+                            "owner": action_item["owner"],
+                            "deadline": action_item["deadline"],
+                            "evidence": chunk_text
+                        })
+
+                    # Check for live decision detection
+                    decision = decision_detector.detect_decision_in_text(chunk_text)
+                    if decision:
+                        await self.broadcast_event(meeting_id, {
+                            "type": "decision_detected",
+                            "meeting_id": meeting_id,
+                            "decision": decision["decision"],
+                            "evidence": chunk_text
+                        })
+                else:
+                    await self.broadcast_event(meeting_id, {
+                        "type": "transcript_partial",
+                        "meeting_id": meeting_id,
+                        "text": chunk_text
+                    })
             return
 
         try:

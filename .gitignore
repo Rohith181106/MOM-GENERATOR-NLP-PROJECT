@@ -41,3 +41,13 @@ exports/
 Thumbs.db
 .vscode/
 .idea/
+
+# Media and temporary test files
+*.wav
+*.mp3
+*.mp4
+*.webm
+*.mov
+*.m4a
+test_meeting*
+

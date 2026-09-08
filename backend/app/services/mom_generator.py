@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -58,6 +58,7 @@ class MoMGenerator:
                 {
                     "decision": d.get("decision"),
                     "evidence": d.get("evidence"),
+                    "source_timestamp": d.get("source_timestamp", "00:00"),
                     "confidence": d.get("confidence", 0.95)
                 }
                 for d in decisions
@@ -69,6 +70,7 @@ class MoMGenerator:
                     "deadline": a.get("deadline", "NEEDS_REVIEW"),
                     "status": a.get("status", "PENDING"),
                     "evidence": a.get("evidence"),
+                    "source_timestamp": a.get("source_timestamp", "00:00"),
                     "needs_review": a.get("needs_review", False),
                     "confidence": a.get("confidence", 0.94)
                 }
@@ -77,7 +79,8 @@ class MoMGenerator:
             "unresolved_issues": [
                 {
                     "issue": u.get("issue"),
-                    "evidence": u.get("evidence")
+                    "evidence": u.get("evidence"),
+                    "source_timestamp": u.get("source_timestamp", "00:00")
                 }
                 for u in unresolved
             ],

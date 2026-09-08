@@ -30,24 +30,27 @@ class DecisionDetector:
             
         return "DISCUSSION"
 
-    def detect_decision_in_text(self, text: str) -> Optional[Dict[str, Any]]:
+    def detect_decision_in_text(self, text: str, timestamp_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         act = self.classify_dialogue_act(text)
         if act == "DECISION":
-            # Clean statement into professional decision phrase
             clean_decision = text.strip()
+            full_evidence = f"{timestamp_str}: {text}" if timestamp_str else text
             return {
                 "decision": clean_decision,
-                "evidence": text,
+                "evidence": full_evidence,
+                "source_timestamp": timestamp_str or "00:00",
                 "confidence": 0.95
             }
         return None
 
-    def detect_unresolved_in_text(self, text: str) -> Optional[Dict[str, Any]]:
+    def detect_unresolved_in_text(self, text: str, timestamp_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         act = self.classify_dialogue_act(text)
         if act == "UNRESOLVED":
+            full_evidence = f"{timestamp_str}: {text}" if timestamp_str else text
             return {
                 "issue": text.strip(),
-                "evidence": text
+                "evidence": full_evidence,
+                "source_timestamp": timestamp_str or "00:00"
             }
         return None
 
@@ -57,10 +60,13 @@ class DecisionDetector:
         
         for seg in segments:
             text = seg.get("text", "")
-            d = self.detect_decision_in_text(text)
+            start = seg.get("start_time", 0.0)
+            end = seg.get("end_time", 0.0)
+            ts = f"[{int(start//60):02d}:{int(start%60):02d} - {int(end//60):02d}:{int(end%60):02d}]"
+            d = self.detect_decision_in_text(text, timestamp_str=ts)
             if d:
                 decisions.append(d)
-            u = self.detect_unresolved_in_text(text)
+            u = self.detect_unresolved_in_text(text, timestamp_str=ts)
             if u:
                 unresolved.append(u)
                 

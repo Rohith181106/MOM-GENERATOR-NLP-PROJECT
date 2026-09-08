@@ -4,8 +4,8 @@ import { meetingAPI } from "../services/api";
 
 export default function UploadMeetingPage({ onUploadSuccess }) {
   const [file, setFile] = useState(null);
-  const [title, setTitle] = useState("Recorded Architecture & Database Meeting");
-  const [participants, setParticipants] = useState("Rohith, Dharun, Priya, Rahul");
+  const [title, setTitle] = useState("");
+  const [participants, setParticipants] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
@@ -14,6 +14,9 @@ export default function UploadMeetingPage({ onUploadSuccess }) {
     if (selected) {
       setFile(selected);
       setError("");
+      if (!title) {
+        setTitle(selected.name.replace(/\.[^/.]+$/, ""));
+      }
     }
   };
 
@@ -30,8 +33,10 @@ export default function UploadMeetingPage({ onUploadSuccess }) {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("title", title);
-      formData.append("participants", participants);
+      formData.append("title", title.trim() || file.name.replace(/\.[^/.]+$/, ""));
+      if (participants.trim()) {
+        formData.append("participants", participants.trim());
+      }
 
       const res = await meetingAPI.upload(formData);
       if (onUploadSuccess) {
@@ -104,6 +109,7 @@ export default function UploadMeetingPage({ onUploadSuccess }) {
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Sprint Architecture Sync"
               className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
           </div>
@@ -114,7 +120,7 @@ export default function UploadMeetingPage({ onUploadSuccess }) {
               type="text"
               value={participants}
               onChange={(e) => setParticipants(e.target.value)}
-              placeholder="Rohith, Dharun, Priya, Rahul"
+              placeholder="e.g. Alice, Bob, Charlie (Leave blank for auto-detected speakers)"
               className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
           </div>

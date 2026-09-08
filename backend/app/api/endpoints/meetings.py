@@ -61,7 +61,7 @@ async def create_meeting(
     await db.refresh(meeting)
 
     # Add participants
-    roster = meeting_in.participants or ["Rohith", "Dharun", "Priya"]
+    roster = meeting_in.participants or []
     for i, name in enumerate(roster):
         p = Participant(
             meeting_id=meeting.id,
@@ -124,13 +124,13 @@ async def delete_meeting(
 async def upload_meeting_file(
     title: str = Form("Uploaded Meeting"),
     date: Optional[str] = Form(None),
-    participants: Optional[str] = Form("Rohith, Dharun, Priya"),
+    participants: Optional[str] = Form(None),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     ext = os.path.splitext(file.filename)[1].lower()
-    allowed_exts = [".mp3", ".wav", ".m4a", ".mp4", ".webm"]
+    allowed_exts = [".mp3", ".wav", ".m4a", ".mp4", ".webm", ".mov", ".avi", ".mkv", ".flac", ".ogg", ".aac"]
     if ext not in allowed_exts:
         raise HTTPException(
             status_code=400,
@@ -158,8 +158,8 @@ async def upload_meeting_file(
     meeting.audio_path = file_path
     await db.commit()
 
-    # Create participants
-    roster = [p.strip() for p in participants.split(",") if p.strip()]
+    # Create participants if explicitly provided
+    roster = [p.strip() for p in participants.split(",") if p.strip()] if participants else []
     for i, name in enumerate(roster):
         db.add(Participant(
             meeting_id=meeting.id,
@@ -240,31 +240,58 @@ async def execute_full_pipeline(meeting_id: int, current_user: User, db: AsyncSe
     if not meeting or meeting.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Meeting not found")
 
-    roster = [p.name for p in meeting.participants] or ["Rohith", "Dharun", "Priya"]
+    roster = [p.name for p in meeting.participants] if meeting.participants else []
 
     # 1. Transcript Acquisition
     if not meeting.transcript_segments:
-        # If uploaded audio or empty live meeting, perform ASR
-        raw_segments = stt_service.transcribe_audio_file(meeting.audio_path or "")
-        # Diarize
-        diar_intervals = diarization_service.diarize_audio(meeting.audio_path or "")
-        # Align
-        aligned = aligner_service.align(raw_segments, diar_intervals, roster)
-        for seg in aligned:
-            s_obj = TranscriptSegment(
-                meeting_id=meeting.id,
-                speaker_label=seg["speaker_label"],
-                speaker_name=seg["speaker_name"],
-                start_time=seg["start_time"],
-                end_time=seg["end_time"],
-                text=seg["text"],
-                confidence=seg.get("confidence", 0.96),
-                is_final=True
-            )
-            meeting.transcript_segments.append(s_obj)
-        await db.commit()
+        if not meeting.audio_path or not os.path.exists(meeting.audio_path):
+            meeting.status = "FAILED"
+            await db.commit()
+            raise HTTPException(status_code=400, detail="No media file available to process for this meeting.")
+
+        try:
+            # Standardize audio to 16kHz mono WAV for Whisper & Diarization
+            wav_path = stt_service.extract_audio_to_wav(meeting.audio_path)
+
+            # Transcribe with faster-whisper (Strictly real AI, no fallback)
+            raw_segments = stt_service.transcribe_audio_file(wav_path)
+            if not raw_segments:
+                meeting.status = "FAILED"
+                await db.commit()
+                raise HTTPException(status_code=400, detail="No speech or dialogue was detected in the uploaded recording.")
+
+            # Diarize using pyannote or acoustic clustering
+            diar_intervals = diarization_service.diarize_audio(wav_path, num_speakers=len(roster) if roster else None)
+
+            # Align speech turns with speakers
+            aligned = aligner_service.align(raw_segments, diar_intervals, roster)
+            for seg in aligned:
+                s_obj = TranscriptSegment(
+                    meeting_id=meeting.id,
+                    speaker_label=seg["speaker_label"],
+                    speaker_name=seg["speaker_name"],
+                    start_time=seg["start_time"],
+                    end_time=seg["end_time"],
+                    text=seg["text"],
+                    confidence=seg.get("confidence", 0.95),
+                    is_final=True
+                )
+                meeting.transcript_segments.append(s_obj)
+            await db.commit()
+        except HTTPException:
+            raise
+        except Exception as e:
+            meeting.status = "FAILED"
+            await db.commit()
+            raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
 
     segments = meeting.transcript_segments
+    if not segments:
+        meeting.status = "FAILED"
+        await db.commit()
+        raise HTTPException(status_code=400, detail="No transcript segments available to generate Minutes of Meeting.")
+
+    effective_roster = roster if roster else list(dict.fromkeys([s.speaker_name for s in segments if s.speaker_name]))
     seg_dicts = [
         {"start_time": s.start_time, "end_time": s.end_time, "text": s.text, "speaker_name": s.speaker_name or s.speaker_label}
         for s in segments
@@ -321,7 +348,7 @@ async def execute_full_pipeline(meeting_id: int, current_user: User, db: AsyncSe
     mom_result = mom_generator_service.generate_mom(
         meeting_title=meeting.title,
         date_str=meeting.date or datetime.utcnow().strftime("%Y-%m-%d"),
-        participants=roster,
+        participants=effective_roster,
         segments=seg_dicts,
         topics=segmented_topics,
         actions=raw_actions,

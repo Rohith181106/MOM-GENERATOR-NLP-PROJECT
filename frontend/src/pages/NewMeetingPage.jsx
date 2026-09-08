@@ -4,18 +4,18 @@ import { meetingAPI } from "../services/api";
 
 export default function NewMeetingPage({ onStartLive, onUploadRecording }) {
   const [meetingType, setMeetingType] = useState("LIVE");
-  const [title, setTitle] = useState("Sprint Planning & Architecture Sync");
+  const [title, setTitle] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [participants, setParticipants] = useState("Rohith, Dharun, Priya, Rahul");
+  const [participants, setParticipants] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleCreate = async () => {
-    if (!title.trim()) return;
+    const finalTitle = title.trim() || "Untitled Meeting";
     setLoading(true);
     try {
       const roster = participants.split(",").map((p) => p.trim()).filter(Boolean);
       const res = await meetingAPI.create({
-        title,
+        title: finalTitle,
         date,
         meeting_type: meetingType,
         participants: roster
@@ -107,12 +107,12 @@ export default function NewMeetingPage({ onStartLive, onUploadRecording }) {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-300">Participant Roster (Comma-separated)</label>
+              <label className="text-xs font-semibold text-slate-300">Participant Roster (Comma-separated, Optional)</label>
               <input
                 type="text"
                 value={participants}
                 onChange={(e) => setParticipants(e.target.value)}
-                placeholder="Rohith, Dharun, Priya, Rahul"
+                placeholder="e.g. Alice, Bob (Leave blank for auto-detected speakers)"
                 className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
             </div>

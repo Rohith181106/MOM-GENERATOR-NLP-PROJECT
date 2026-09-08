@@ -13,7 +13,7 @@ export default function LiveMeetingRoom({ meeting, onEndMeeting }) {
   const [meetingTimer, setMeetingTimer] = useState(0);
   const [transcriptSegments, setTranscriptSegments] = useState(meeting.transcript_segments || []);
   const [interimText, setInterimText] = useState("");
-  const [interimSpeaker, setInterimSpeaker] = useState("Rohith");
+  const [interimSpeaker, setInterimSpeaker] = useState(meeting.participants?.[0]?.name || "Speaker (You)");
   const [autoScroll, setAutoScroll] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [copied, setCopied] = useState(false);
@@ -31,10 +31,7 @@ export default function LiveMeetingRoom({ meeting, onEndMeeting }) {
   const participants = meeting.participants?.length > 0
     ? meeting.participants
     : [
-        { id: 1, name: "Rohith (You)", speaker_label: "SPEAKER_00", role: "Team Lead" },
-        { id: 2, name: "Dharun", speaker_label: "SPEAKER_01", role: "Backend Eng" },
-        { id: 3, name: "Priya", speaker_label: "SPEAKER_02", role: "Frontend Lead" },
-        { id: 4, name: "Rahul", speaker_label: "SPEAKER_03", role: "QA Engineer" },
+        { id: 1, name: "Speaker 00 (You)", speaker_label: "SPEAKER_00", role: "Host" },
       ];
 
   const [activeSpeaker, setActiveSpeaker] = useState(participants[0].name);
@@ -65,9 +62,17 @@ export default function LiveMeetingRoom({ meeting, onEndMeeting }) {
 
   // WebSocket connection & Web Speech / Microphone ASR Streaming
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/meetings/${meeting.id}`;
+    let wsUrl;
+    if (import.meta.env.VITE_API_URL) {
+      const cleanUrl = import.meta.env.VITE_API_URL.replace(/\/+$/, "");
+      const wsProtocol = cleanUrl.startsWith("https") ? "wss:" : "ws:";
+      const wsHost = cleanUrl.replace(/^https?:\/\//, "");
+      wsUrl = `${wsProtocol}//${wsHost}/ws/meetings/${meeting.id}`;
+    } else {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      wsUrl = `${protocol}//${host}/ws/meetings/${meeting.id}`;
+    }
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -272,68 +277,45 @@ export default function LiveMeetingRoom({ meeting, onEndMeeting }) {
 
           {/* Participant Video Grid */}
           <div className="flex-1 grid grid-cols-2 gap-3 min-h-0">
-            {/* Tile 1: User / Camera */}
-            <div className={`relative rounded-2xl bg-slate-900/80 border overflow-hidden flex items-center justify-center transition-all ${activeSpeaker === "Rohith (You)" ? "border-indigo-500 shadow-lg shadow-indigo-500/20" : "border-slate-800/80"}`}>
-              {cameraEnabled ? (
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              ) : (
-                <div className="flex flex-col items-center">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center text-xl font-bold text-white shadow-lg">
-                    R
+          <div className="grid grid-cols-2 gap-4 h-full">
+            {participants.map((p, idx) => {
+              const isLocalUser = idx === 0;
+              const isSpeaking = activeSpeaker === p.name || activeSpeaker === p.speaker_label;
+              const initials = p.name ? p.name.charAt(0).toUpperCase() : `S${idx}`;
+              const colors = [
+                "from-indigo-600 to-cyan-500",
+                "from-emerald-600 to-teal-400",
+                "from-pink-600 to-purple-400",
+                "from-amber-600 to-orange-400"
+              ];
+              const colorClass = colors[idx % colors.length];
+
+              return (
+                <div
+                  key={p.id || idx}
+                  className={`relative rounded-2xl bg-slate-900/80 border overflow-hidden flex items-center justify-center transition-all ${
+                    isSpeaking ? "border-indigo-500 shadow-lg shadow-indigo-500/20" : "border-slate-800/80"
+                  }`}
+                >
+                  {isLocalUser && cameraEnabled ? (
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      <div className={`w-16 h-16 rounded-full bg-gradient-to-tr ${colorClass} flex items-center justify-center text-xl font-bold text-white shadow-lg`}>
+                        {initials}
+                      </div>
+                      <p className="text-xs text-slate-300 mt-2 font-medium">{p.name || `Speaker ${idx}`}</p>
+                      {p.role && <p className="text-[10px] text-slate-400">{p.role}</p>}
+                    </div>
+                  )}
+                  <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-950/70 backdrop-blur-sm text-xs font-medium text-white flex items-center gap-1.5 border border-slate-700/50">
+                    <span className={`w-2 h-2 rounded-full ${isLocalUser ? (micEnabled ? "bg-emerald-400" : "bg-red-400") : "bg-emerald-400"}`} />
+                    <span>{p.name || `Speaker ${idx}`}</span>
                   </div>
-                  <p className="text-xs text-slate-300 mt-2 font-medium">Rohith (You)</p>
                 </div>
-              )}
-              <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-950/70 backdrop-blur-sm text-xs font-medium text-white flex items-center gap-1.5 border border-slate-700/50">
-                <span className={`w-2 h-2 rounded-full ${micEnabled ? "bg-emerald-400" : "bg-red-400"}`} />
-                <span>Rohith (You)</span>
-              </div>
-            </div>
-
-            {/* Tile 2: Dharun */}
-            <div className={`relative rounded-2xl bg-slate-900/80 border overflow-hidden flex items-center justify-center transition-all ${activeSpeaker === "Dharun" ? "border-indigo-500 shadow-lg shadow-indigo-500/20" : "border-slate-800/80"}`}>
-              <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-xl font-bold text-white shadow-lg">
-                  D
-                </div>
-                <p className="text-xs text-slate-300 mt-2 font-medium">Dharun</p>
-                <p className="text-[10px] text-slate-400">Backend API</p>
-              </div>
-              <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-950/70 backdrop-blur-sm text-xs font-medium text-white flex items-center gap-1.5 border border-slate-700/50">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span>Dharun</span>
-              </div>
-            </div>
-
-            {/* Tile 3: Priya */}
-            <div className={`relative rounded-2xl bg-slate-900/80 border overflow-hidden flex items-center justify-center transition-all ${activeSpeaker === "Priya" ? "border-indigo-500 shadow-lg shadow-indigo-500/20" : "border-slate-800/80"}`}>
-              <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-pink-600 to-purple-400 flex items-center justify-center text-xl font-bold text-white shadow-lg">
-                  P
-                </div>
-                <p className="text-xs text-slate-300 mt-2 font-medium">Priya</p>
-                <p className="text-[10px] text-slate-400">Frontend & 3D</p>
-              </div>
-              <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-950/70 backdrop-blur-sm text-xs font-medium text-white flex items-center gap-1.5 border border-slate-700/50">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span>Priya</span>
-              </div>
-            </div>
-
-            {/* Tile 4: Rahul */}
-            <div className={`relative rounded-2xl bg-slate-900/80 border overflow-hidden flex items-center justify-center transition-all ${activeSpeaker === "Rahul" ? "border-indigo-500 shadow-lg shadow-indigo-500/20" : "border-slate-800/80"}`}>
-              <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-600 to-orange-400 flex items-center justify-center text-xl font-bold text-white shadow-lg">
-                  R
-                </div>
-                <p className="text-xs text-slate-300 mt-2 font-medium">Rahul</p>
-                <p className="text-[10px] text-slate-400">QA & Testing</p>
-              </div>
-              <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-950/70 backdrop-blur-sm text-xs font-medium text-white flex items-center gap-1.5 border border-slate-700/50">
-                <span className="w-2 h-2 rounded-full bg-slate-500" />
-                <span>Rahul</span>
-              </div>
-            </div>
+              );
+            })}
+          </div>
           </div>
         </div>
 
